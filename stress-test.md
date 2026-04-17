@@ -334,41 +334,18 @@ quadrantChart
 ```mermaid
 requirementDiagram
 
-requirement performance_req {
-    id: REQ-001
-    text: Response under 200ms
+    requirement test_req {
+    id: 1
+    text: the test text.
     risk: high
     verifymethod: test
-}
+    }
 
-requirement security_req {
-    id: REQ-002
-    text: Encrypt data at rest
-    risk: medium
-    verifymethod: inspection
-}
+    element test_entity {
+    type: simulation
+    }
 
-functionalRequirement auth_req {
-    id: REQ-003
-    text: Support OAuth 2.0
-    risk: low
-    verifymethod: demonstration
-}
-
-element api_gateway {
-    type: microservice
-    docRef: arch-doc-v2
-}
-
-element encryption_module {
-    type: library
-    docRef: sec-doc-v1
-}
-
-api_gateway - satisfies -> performance_req
-api_gateway - satisfies -> auth_req
-encryption_module - satisfies -> security_req
-security_req - derives -> auth_req
+    test_entity - satisfies -> test_req
 ```
 
 ## 13. Mindmap
