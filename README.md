@@ -22,7 +22,7 @@ Single `<script>` import — no extra CSS or dependency tags needed.
 ## Quick start
 
 ```html
-<script src="docsify-mermaid-lightbox.js"></script>
+<script src="https://gllmar.github.io/docsify-mermaid-lightbox/docsify-mermaid-lightbox.js"></script>
 ```
 
 That's it. Drop the script **before** the Docsify script in your `index.html`.
