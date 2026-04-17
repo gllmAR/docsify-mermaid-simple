@@ -105,6 +105,35 @@
   opacity: .8;
 }
 
+/* Copy button */
+.docsify-mermaid-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0,0,0,.06);
+  color: var(--color-text, #555);
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity .2s, background .2s;
+  z-index: 2;
+}
+.docsify-mermaid:hover .docsify-mermaid-copy {
+  opacity: .7;
+}
+.docsify-mermaid-copy:hover {
+  opacity: 1 !important;
+  background: rgba(0,0,0,.12);
+}
+
 /* ---- Lightbox overlay ---- */
 .mermaid-lightbox-overlay {
   position: fixed;
@@ -319,6 +348,23 @@
         wrapper.className = 'docsify-mermaid';
         wrapper.innerHTML = result.svg;
         wrapper.setAttribute('data-mermaid-source', graphDef);
+
+        // Copy-to-clipboard button
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'docsify-mermaid-copy';
+        copyBtn.title = 'Copy Mermaid source';
+        copyBtn.innerHTML = '\u2398'; // ⎘ copy symbol
+        copyBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var src = this.parentElement.getAttribute('data-mermaid-source');
+          var block = '```mermaid\n' + src + '\n```';
+          navigator.clipboard.writeText(block).then(function () {
+            copyBtn.textContent = '\u2713'; // ✓
+            setTimeout(function () { copyBtn.innerHTML = '\u2398'; }, 1500);
+          });
+        });
+        wrapper.appendChild(copyBtn);
+
         pre.replaceWith(wrapper);
 
         if (cfg.lightbox) {
