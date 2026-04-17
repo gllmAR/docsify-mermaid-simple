@@ -15,7 +15,7 @@ No extra CSS or dependency tags needed — the plugin self-injects everything.
 ## Quick start
 
 ```html
-<script src="docsify-mermaid-plugin.js"></script>
+<script src="docsify-mermaid-lightbox.js"></script>
 ```
 
 That's it. Drop the script **before** the Docsify script in your `index.html`.

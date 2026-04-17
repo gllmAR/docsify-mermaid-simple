@@ -1,11 +1,11 @@
 /**
- * docsify-mermaid-plugin.js
+ * docsify-mermaid-lightbox.js
  * A self-contained Docsify plugin for Mermaid diagram rendering.
  * Single-script import — handles CSS injection, Mermaid loading, rendering,
  * and provides a lightbox with zoom / pan / pseudo-fullscreen navigation.
  *
  * Usage:
- *   <script src="docsify-mermaid-plugin.js"></script>
+ *   <script src="docsify-mermaid-lightbox.js"></script>
  *
  * Config (optional, on window before docsify loads):
  *   window.$docsifyMermaid = {
@@ -62,7 +62,7 @@
   /*  CSS injection                                                      */
   /* ------------------------------------------------------------------ */
   var css = `
-/* ---- docsify-mermaid-plugin styles ---- */
+/* ---- docsify-mermaid-lightbox styles ---- */
 
 /* Diagram wrapper — uses Docsify 5 CSS variables */
 .docsify-mermaid {
@@ -83,6 +83,11 @@
 .docsify-mermaid svg {
   max-width: 100%;
   height: auto;
+}
+
+/* Lightbox SVG — remove Mermaid's inline max-width so we control size via transform */
+.mermaid-lightbox-svg svg {
+  max-width: none !important;
 }
 
 /* Expand hint */
@@ -378,10 +383,11 @@
   // Double-tap state
   var lastTapTime = 0;
 
-  var MIN_SCALE = 1;
-  var MAX_SCALE = 5;
-  var ELASTIC_MIN = 0.8;
-  var ELASTIC_MAX = 5.5;
+  var MIN_SCALE = 0.1;
+  var MAX_SCALE = 20;
+  var ELASTIC_MIN = 0.08;
+  var ELASTIC_MAX = 22;
+  var fitScale = 1; // computed per-diagram to fit viewport
 
   function collectDiagrams() {
     lightboxDiagrams = Array.from(
@@ -401,6 +407,71 @@
     return lightboxOverlay && lightboxOverlay.querySelector('.mermaid-lightbox-svg');
   }
 
+  /** Compute scale so the SVG content fits the viewport with padding */
+  function computeFitScale(svgContainer) {
+    var svg = svgContainer.querySelector('svg');
+    if (!svg) return 1;
+
+    var svgW = 0, svgH = 0;
+
+    // 1. Try viewBox (most reliable — gives true content bounds)
+    var vb = svg.getAttribute('viewBox');
+    if (vb) {
+      var parts = vb.split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        svgW = parts[2];
+        svgH = parts[3];
+      }
+    }
+
+    // 2. Try width/height attributes (Mermaid often sets these)
+    if (!svgW || !svgH) {
+      var attrW = parseFloat(svg.getAttribute('width'));
+      var attrH = parseFloat(svg.getAttribute('height'));
+      if (attrW > 0) svgW = svgW || attrW;
+      if (attrH > 0) svgH = svgH || attrH;
+    }
+
+    // 3. Try inline style dimensions (Mermaid may use max-width / height in style)
+    if (!svgW || !svgH) {
+      var styleW = parseFloat(svg.style.maxWidth) || parseFloat(svg.style.width);
+      var styleH = parseFloat(svg.style.height);
+      if (styleW > 0) svgW = svgW || styleW;
+      if (styleH > 0) svgH = svgH || styleH;
+    }
+
+    // 4. Last resort: temporarily reset constraints and measure the rendered size
+    if (!svgW || !svgH) {
+      var origMaxW = svg.style.maxWidth;
+      var origW = svg.style.width;
+      var origH = svg.style.height;
+      svg.style.maxWidth = 'none';
+      svg.style.width = 'auto';
+      svg.style.height = 'auto';
+      var bbox = svg.getBoundingClientRect();
+      svgW = svgW || bbox.width;
+      svgH = svgH || bbox.height;
+      svg.style.maxWidth = origMaxW;
+      svg.style.width = origW;
+      svg.style.height = origH;
+    }
+
+    if (!svgW || !svgH) return 1;
+
+    // Available viewport (margins for toolbar/nav/counter + lightbox padding)
+    var pad = 48; // ~1.5em padding each side
+    var vpW = window.innerWidth * 0.90 - pad;
+    var vpH = window.innerHeight * 0.85 - pad;
+
+    // Fit to the tighter axis so the entire diagram is visible
+    var scaleW = vpW / svgW;
+    var scaleH = vpH / svgH;
+    var scale = Math.min(scaleW, scaleH);
+
+    // Don't over-enlarge tiny diagrams beyond 4x
+    return Math.min(scale, 4);
+  }
+
   /* ---- Transform helpers ---- */
   function applyTransform(el, animate) {
     var svgEl = el || getSvgEl();
@@ -413,7 +484,7 @@
     svgEl.style.transform = 'translate3d(' + lbX + 'px, ' + lbY + 'px, 0) scale(' + lbScale + ')';
 
     // Update cursor
-    if (lbScale > MIN_SCALE) {
+    if (lbScale > fitScale + 0.01) {
       svgEl.classList.add('zoomed');
     } else {
       svgEl.classList.remove('zoomed');
@@ -421,10 +492,10 @@
   }
 
   function resetZoom(animate) {
-    lbScale = 1;
+    lbScale = fitScale;
     lbX = 0;
     lbY = 0;
-    startScale = 1;
+    startScale = fitScale;
     zoomVelocity = 0;
     var svgEl = getSvgEl();
     if (svgEl) {
@@ -432,7 +503,7 @@
         svgEl.classList.remove('no-transition');
         svgEl.style.transition = 'transform .3s cubic-bezier(0.23, 1, 0.32, 1)';
       }
-      svgEl.style.transform = 'translate3d(0, 0, 0) scale(1)';
+      svgEl.style.transform = 'translate3d(0, 0, 0) scale(' + fitScale + ')';
       svgEl.classList.remove('zoomed', 'grabbing');
       if (animate !== false) {
         setTimeout(function () {
@@ -453,7 +524,7 @@
   }
 
   function clampTranslation(svgEl, scale) {
-    if (scale <= MIN_SCALE) {
+    if (scale <= fitScale) {
       lbX = 0;
       lbY = 0;
       return;
@@ -497,8 +568,8 @@
     lbY -= (deltaH * percentY) - (deltaH / 2);
     lbScale = newScale;
 
-    // Smooth reset towards center when zooming back to MIN_SCALE
-    if (newScale <= MIN_SCALE) {
+    // Smooth reset towards center when zooming back to fitScale
+    if (newScale <= fitScale) {
       lbX = 0;
       lbY = 0;
     } else {
@@ -531,7 +602,6 @@
   /* ---- Show / close / navigate ---- */
   function showLightbox() {
     if (!lightboxOverlay) buildLightboxDOM();
-    resetZoom(false);
 
     var wrapper = lightboxDiagrams[lightboxIndex];
     if (!wrapper) return;
@@ -541,7 +611,19 @@
       ? wrapper.querySelector('svg').outerHTML
       : wrapper.innerHTML;
 
+    // Compute fit-to-screen scale from SVG intrinsic dimensions
+    fitScale = computeFitScale(svgContainer);
+
+    // Initialize zoom state at fit scale
+    lbScale = fitScale;
+    lbX = 0;
+    lbY = 0;
+    startScale = fitScale;
+    zoomVelocity = 0;
+    svgContainer.classList.remove('zoomed', 'grabbing');
+    svgContainer.classList.add('no-transition');
     applyTransform(svgContainer, false);
+
     updateCounter();
     updateNavButtons();
 
@@ -708,8 +790,8 @@
       var timeDelta = now - lastWheelTime;
       lastWheelTime = now;
 
-      var currentZoomFactor = 0.12 * (1 - Math.abs(lbScale - 2.5) / 4);
-      currentZoomFactor = Math.max(0.04, currentZoomFactor);
+      var currentZoomFactor = 0.06 * lbScale;
+      currentZoomFactor = Math.max(0.005, Math.min(1.0, currentZoomFactor));
       var rawDelta = Math.sign(-e.deltaY) * currentZoomFactor;
 
       // Smooth velocity
@@ -725,7 +807,7 @@
       clearTimeout(wheelTimeout);
       wheelTimeout = setTimeout(function () {
         el.classList.remove('no-transition');
-        if (lbScale < MIN_SCALE + 0.05 && lbScale > MIN_SCALE - 0.05) {
+        if (Math.abs(lbScale - fitScale) < fitScale * 0.05) {
           resetZoom(true);
         }
       }, 200);
@@ -735,7 +817,7 @@
     lightboxOverlay.addEventListener('mousedown', function (e) {
       var el = getSvgEl();
       if (!el || e.button !== 0) return;
-      if (lbScale <= MIN_SCALE) return; // No drag unless zoomed
+      if (lbScale <= fitScale) return; // No drag unless zoomed
 
       e.preventDefault();
       isDraggingMouse = true;
@@ -784,7 +866,7 @@
         lastTouchX = touchStartX;
         lastTouchY = touchStartY;
 
-        if (lbScale > MIN_SCALE) {
+        if (lbScale > fitScale) {
           isTouchDragging = true;
           el.classList.add('no-transition');
         }
@@ -820,13 +902,13 @@
 
           // Elastic rubber-band at limits
           var targetScale = startScale * pinchRatio;
-          if (targetScale < MIN_SCALE) {
-            pinchRatio = MIN_SCALE / startScale + (pinchRatio - MIN_SCALE / startScale) * 0.3;
+          if (targetScale < fitScale) {
+            pinchRatio = fitScale / startScale + (pinchRatio - fitScale / startScale) * 0.3;
           } else if (targetScale > MAX_SCALE) {
             pinchRatio = MAX_SCALE / startScale - (MAX_SCALE / startScale - pinchRatio) * 0.3;
           }
 
-          var newScale = Math.max(ELASTIC_MIN, Math.min(ELASTIC_MAX, startScale * pinchRatio));
+          var newScale = Math.max(fitScale * 0.5, Math.min(ELASTIC_MAX, startScale * pinchRatio));
           var scaleChange = newScale / lbScale;
 
           // Pan follows pinch center movement
@@ -847,7 +929,7 @@
           lbScale = newScale;
 
           // Soft constraints with elasticity
-          if (lbScale >= MIN_SCALE) {
+          if (lbScale >= fitScale) {
             var c = getConstraints(el, lbScale);
             if (Math.abs(lbX) > c.maxX) {
               lbX = Math.sign(lbX) * (c.maxX + (Math.abs(lbX) - c.maxX) * 0.3);
@@ -861,13 +943,13 @@
           }
 
           el.style.transform = 'translate3d(' + lbX + 'px, ' + lbY + 'px, 0) scale(' + lbScale + ')';
-          if (lbScale > MIN_SCALE) { el.classList.add('zoomed'); } else { el.classList.remove('zoomed'); }
+          if (lbScale > fitScale + 0.01) { el.classList.add('zoomed'); } else { el.classList.remove('zoomed'); }
 
           lastPinchCenter = { x: currentCenter.x, y: currentCenter.y };
           rafId = null;
         });
 
-      } else if (e.touches.length === 1 && isTouchDragging && lbScale > MIN_SCALE) {
+      } else if (e.touches.length === 1 && isTouchDragging && lbScale > fitScale) {
         // ---- Single-touch drag when zoomed ----
         e.preventDefault();
         var touch = e.touches[0];
@@ -897,7 +979,7 @@
       touchEndY = e.changedTouches[0].clientY;
 
       // Elastic snap-back if outside allowed range
-      if (lbScale < MIN_SCALE) {
+      if (lbScale < fitScale * 0.95) {
         resetZoom(true);
       } else if (lbScale > MAX_SCALE) {
         lbScale = MAX_SCALE;
@@ -905,13 +987,13 @@
           clampTranslation(el, lbScale);
           el.style.transform = 'translate3d(' + lbX + 'px, ' + lbY + 'px, 0) scale(' + lbScale + ')';
         }
-      } else if (lbScale < MIN_SCALE + 0.05 && lbScale > MIN_SCALE - 0.05) {
-        // Near 1 — snap back
+      } else if (Math.abs(lbScale - fitScale) < fitScale * 0.05) {
+        // Near fitScale — snap back
         resetZoom(true);
       }
 
       // Swipe navigation only when not zoomed and not pinching
-      if (lbScale <= MIN_SCALE && !isPinching && !isTouchDragging) {
+      if (lbScale <= fitScale + 0.01 && !isPinching && !isTouchDragging) {
         handleSwipe();
       }
 
@@ -943,9 +1025,9 @@
           el.classList.remove('no-transition');
           el.style.transition = 'transform .3s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
 
-          if (lbScale <= MIN_SCALE) {
-            // Zoom in 2.5x towards tap point
-            var targetScale = 2.5;
+          if (lbScale <= fitScale + 0.01) {
+            // Zoom in 3x from fit scale towards tap point
+            var targetScale = fitScale * 3;
             var cx = touch.clientX;
             var cy = touch.clientY;
             var ratio = targetScale / lbScale;
